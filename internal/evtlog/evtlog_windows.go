@@ -126,14 +126,13 @@ func (s *Subscription) Run(ctx context.Context, fn func(xml string)) error {
 	}()
 	events := make([]handle, 64)
 	for {
-		ev, err := windows.WaitForMultipleObjects([]windows.Handle{s.signal, stop}, false, windows.INFINITE)
+		ev, err := windows.WaitForMultipleObjects([]windows.Handle{s.signal, stop}, false, 1000)
 		if err != nil {
 			return err
 		}
 		if ev == windows.WAIT_OBJECT_0+1 {
 			return ctx.Err()
 		}
-		windows.ResetEvent(s.signal)
 		for {
 			var n uint32
 			r, _, e := procEvtNext.Call(uintptr(s.sub), uintptr(len(events)), uintptr(unsafe.Pointer(&events[0])), 0, 0, uintptr(unsafe.Pointer(&n)))
@@ -163,6 +162,7 @@ func (s *Subscription) Run(ctx context.Context, fn func(xml string)) error {
 				}
 			}
 		}
+		windows.ResetEvent(s.signal)
 	}
 }
 
