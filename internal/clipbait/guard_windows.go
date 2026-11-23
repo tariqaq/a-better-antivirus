@@ -67,10 +67,11 @@ const (
 	wmDestroyClip  = 0x0307
 	pmRemove       = 1
 	qsAllInput     = 0x04FF
-	hwndMessage    = ^uintptr(2) // HWND_MESSAGE, (HWND)-3
-	maxSavedBytes  = 8 << 20
-	defaultWindow  = 2500 * time.Millisecond
-	defaultConfirm = 1500 * time.Millisecond
+	hwndMessage     = ^uintptr(2) // HWND_MESSAGE, (HWND)-3
+	maxSavedBytes   = 8 << 20
+	clipWindowClass = "ClipboardSyncHost"
+	defaultWindow   = 2500 * time.Millisecond
+	defaultConfirm  = 1500 * time.Millisecond
 )
 
 // Formats that are only there to go with text: browsers, editors and
@@ -400,7 +401,11 @@ func readClipboard(hwnd uintptr) ([]clipFormat, uint32, error) {
 		if f != cfText && f != cfOEMText && f != cfUnicodeText && f != cfLocale && !textFormats[name] {
 			return nil, 0, Skipped("the clipboard holds more than text (" + name + ")")
 		}
-		data, ok := readFormat(f)
+		remain := maxSavedBytes - total
+		data, ok, tooBig := readFormatLimit(f, remain)
+		if tooBig {
+			return nil, 0, Skipped("what's on the clipboard is very large")
+		}
 		if !ok && (f == cfText || f == cfOEMText || f == cfLocale) {
 			continue // Windows makes these from the text again when it's put back
 		}
@@ -409,9 +414,7 @@ func readClipboard(hwnd uintptr) ([]clipFormat, uint32, error) {
 			// (it gives it when asked, and isn't answering).
 			return nil, 0, Skipped("part of the clipboard couldn't be read (" + name + ")")
 		}
-		if total += len(data); total > maxSavedBytes {
-			return nil, 0, Skipped("what's on the clipboard is very large")
-		}
+		total += len(data)
 		out = append(out, clipFormat{f, reg, data})
 	}
 	return out, at, nil
@@ -577,6 +580,10 @@ func (g *Guard) identify(f *Finding, o observation) {
 			return false
 		}
 		tried[pid] = true
+		if protectedClipPID(pid) {
+			g.Logf("clipboard bait: skipping protected process pid %d", pid)
+			return false
+		}
 		ok, interrupted := g.pauseTest(pid)
 		if interrupted {
 			f.Interrupted = true
@@ -767,18 +774,21 @@ func registerFormat(name string) uint32 {
 	return uint32(r)
 }
 
-func readFormat(f uint32) ([]byte, bool) {
+func readFormatLimit(f uint32, maxBytes int) (data []byte, ok bool, tooBig bool) {
 	h, _, _ := pGetClipboardData.Call(uintptr(f))
 	if h == 0 {
-		return nil, false
+		return nil, false, false
 	}
 	size, _, _ := pGlobalSize.Call(h)
+	if maxBytes >= 0 && size > uintptr(maxBytes) {
+		return nil, false, true
+	}
 	p, _, _ := pGlobalLock.Call(h)
 	if p == 0 {
-		return nil, false
+		return nil, false, false
 	}
 	defer pGlobalUnlock.Call(h)
-	return append([]byte(nil), globalMem(p, int(size))...), true
+	return append([]byte(nil), globalMem(p, int(size))...), true, false
 }
 
 // globalMem is the n bytes at p, memory GlobalLock handed out (not Go's,
@@ -788,7 +798,7 @@ func globalMem(p uintptr, n int) []byte {
 }
 
 func readText() string {
-	data, ok := readFormat(cfUnicodeText)
+	data, ok, _ := readFormatLimit(cfUnicodeText, maxSavedBytes)
 	if !ok || len(data) < 2 {
 		return ""
 	}
@@ -864,7 +874,7 @@ var wndProc = windows.NewCallback(func(h, msg, wp, lp uintptr) uintptr {
 var classRegistered bool
 
 func makeWindow() uintptr {
-	name, _ := windows.UTF16PtrFromString("ABAClipboardBait")
+	name, _ := windows.UTF16PtrFromString(clipWindowClass)
 	if !classRegistered {
 		wc := struct {
 			size, style            uint32

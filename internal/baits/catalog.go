@@ -185,6 +185,8 @@ func chromiumFiles(userData string, passwords string) []FileSpec {
 // until it reached that number, and it adopted the folder), ABA retires the
 // bait like a decoy whose app got installed.
 
+const maxMetadataBytes = 4 << 20
+
 type localState struct {
 	Profile struct {
 		InfoCache map[string]json.RawMessage `json:"info_cache"`
@@ -193,7 +195,7 @@ type localState struct {
 }
 
 func readLocalState(userData string) (ls localState, ok bool) {
-	b, err := os.ReadFile(j(userData, "Local State"))
+	b, err := safeReadFileLimit(j(userData, "Local State"), maxMetadataBytes)
 	if err != nil {
 		return ls, false
 	}
@@ -270,7 +272,7 @@ func (s Spec) profilesFile() string {
 // profiles.ini names: the only ones Firefox opens.
 func firefoxProfiles(root string) map[string]bool {
 	out := map[string]bool{}
-	b, err := os.ReadFile(j(root, firefoxIndex))
+	b, err := safeReadFileLimit(j(root, firefoxIndex), maxMetadataBytes)
 	if err != nil {
 		return out
 	}

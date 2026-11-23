@@ -70,3 +70,36 @@ func TestNoReparseRejectsJunction(t *testing.T) {
 		t.Fatalf("sentinel was modified or removed: err=%v data=%q", err, b)
 	}
 }
+
+func TestReadFileNoReparseLimit(t *testing.T) {
+	root := t.TempDir()
+	okFile := filepath.Join(root, "ok.txt")
+	if err := os.WriteFile(okFile, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	b, err := ReadFileNoReparseLimit(okFile, 16)
+	if err != nil || string(b) != "hello" {
+		t.Fatalf("ReadFileNoReparseLimit(ok) = %q, %v", b, err)
+	}
+
+	bigFile := filepath.Join(root, "big.txt")
+	if err := os.WriteFile(bigFile, make([]byte, 32), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadFileNoReparseLimit(bigFile, 16); !errors.Is(err, ErrFileTooLarge) {
+		t.Fatalf("ReadFileNoReparseLimit(big) = %v, want ErrFileTooLarge", err)
+	}
+
+	targetDir := filepath.Join(root, "target")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(targetDir, "secret.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	linkDir := filepath.Join(root, "link")
+	makeJunction(t, linkDir, targetDir)
+	if _, err := ReadFileNoReparseLimit(filepath.Join(linkDir, "secret.txt"), 16); !errors.Is(err, ErrReparsePoint) {
+		t.Fatalf("ReadFileNoReparseLimit(junction) = %v, want ErrReparsePoint", err)
+	}
+}

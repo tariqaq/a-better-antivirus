@@ -94,6 +94,7 @@ type Classifier struct {
 // Rules from trusting an app's single alert cover only that bait, so they
 // don't exempt it. sig may be nil (not checked yet).
 func (c *Classifier) SweepExempt(image string, pid uint32, sig *provenance.Result) bool {
+	valid := sig != nil && sig.Valid
 	signer := ""
 	if sig != nil {
 		signer = sig.Signer
@@ -102,12 +103,12 @@ func (c *Classifier) SweepExempt(image string, pid uint32, sig *provenance.Resul
 		return true
 	}
 	for _, p := range builtinIgnore {
-		if Glob(c.Env.expand(p), image) && (sig == nil || (sig.Valid && osVendor(signer))) {
+		if Glob(c.Env.expand(p), image) && (sig == nil || (valid && osVendor(signer))) {
 			return true
 		}
 	}
 	for _, r := range c.Ignore {
-		if len(r.Baits) == 0 && c.ruleMatches(r, image, pid, "", signer, sig != nil) {
+		if len(r.Baits) == 0 && c.ruleMatches(r, image, pid, "", signer, valid) {
 			return true
 		}
 	}
@@ -128,12 +129,13 @@ func (c *Classifier) HasTricksRule() bool {
 // baitID in a way that otherwise counts as evasion (config.IgnoreRule.Tricks).
 // sig may be nil (not checked yet): rules that name a signer then don't match.
 func (c *Classifier) TricksAllowed(image string, pid uint32, baitID string, sig *provenance.Result) bool {
+	valid := sig != nil && sig.Valid
 	signer := ""
 	if sig != nil {
 		signer = sig.Signer
 	}
 	for _, r := range c.Ignore {
-		if r.Tricks && c.ruleMatches(r, image, pid, baitID, signer, sig != nil) {
+		if r.Tricks && c.ruleMatches(r, image, pid, baitID, signer, valid) {
 			return true
 		}
 	}
@@ -166,7 +168,7 @@ func (c *Classifier) decide(image string, pid uint32, bait Bait, sig *provenance
 	}
 
 	for _, r := range c.Ignore {
-		if c.ruleMatches(r, image, pid, bait.ID, signer, sig != nil) {
+		if c.ruleMatches(r, image, pid, bait.ID, signer, valid) {
 			why := "matches your ignore rule"
 			if r.Note != "" {
 				why += " (" + r.Note + ")"
@@ -239,7 +241,7 @@ func (c *Classifier) decide(image string, pid uint32, bait Bait, sig *provenance
 	return c.byLocation(image, name, pid, loc, sig, sigNote)
 }
 
-func (c *Classifier) ruleMatches(r config.IgnoreRule, image string, pid uint32, baitID, signer string, sigKnown bool) bool {
+func (c *Classifier) ruleMatches(r config.IgnoreRule, image string, pid uint32, baitID, signer string, sigValid bool) bool {
 	if r.Path == "" && r.Signer == "" && r.SHA256 == "" {
 		return false
 	}
@@ -250,7 +252,7 @@ func (c *Classifier) ruleMatches(r config.IgnoreRule, image string, pid uint32, 
 		return false
 	}
 	if r.Signer != "" {
-		if !sigKnown || !strings.Contains(strings.ToLower(signer), strings.ToLower(r.Signer)) {
+		if !sigValid || !strings.Contains(strings.ToLower(signer), strings.ToLower(r.Signer)) {
 			return false
 		}
 	}

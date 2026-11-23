@@ -395,7 +395,7 @@ func (s *server) SuspendMore(root uint32, already []uint32) []uint32 {
 	}
 	return procinfo.SuspendTreeExcept(root, skip, func(pid uint32) bool {
 		img, err := procinfo.ImagePath(pid)
-		return err == nil && !s.IsSelf(img) && !s.Elevated(pid)
+		return err == nil && !s.IsSelf(img) && !s.Elevated(pid) && (s.eng == nil || !s.eng.ProtectedProcess(img))
 	})
 }
 
@@ -520,6 +520,8 @@ func (s *server) decideOpen(path string, at time.Time, pid uint32) bool {
 	return true
 }
 
+const maxHashCache = 2048
+
 var (
 	selfHashOnce sync.Once
 	selfHash     string
@@ -562,6 +564,9 @@ func (s *server) Hash(image string) string {
 	if !ok {
 		h, _ = procinfo.FileSHA256(image)
 		hashCacheMu.Lock()
+		if len(hashCache) >= maxHashCache {
+			hashCache = make(map[string]string, maxHashCache/2)
+		}
 		hashCache[key] = h
 		hashCacheMu.Unlock()
 	}

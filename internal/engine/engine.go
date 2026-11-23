@@ -181,10 +181,19 @@ func (e *Engine) touchable(pid uint32, image string) bool {
 	if pid == 0 || pid == 4 || pid == e.SelfPID {
 		return false
 	}
+	return !e.ProtectedProcess(image)
+}
+
+// ProtectedProcess reports whether image is an OS-critical process ABA must
+// never suspend or kill.
+func (e *Engine) ProtectedProcess(image string) bool {
 	e.mu.Lock()
 	cls := e.classifier
 	e.mu.Unlock()
-	return cls == nil || !cls.ProtectedProcess(image)
+	if cls == nil {
+		cls = &classify.Classifier{Env: classify.DefaultEnv()}
+	}
+	return cls.ProtectedProcess(image)
 }
 
 // NoteEvasion records that pid did something only an attempt to dodge
@@ -1146,12 +1155,31 @@ func (e *Engine) sweepVerdict(v classify.Verdict, swept []string) classify.Verdi
 // stays quiet after its first notification.
 const repeatWindow = 12 * time.Hour
 
+const maxSeenEntries = 4096
+
 func (e *Engine) repeat(image, baitID string, now time.Time) bool {
 	key := strings.ToLower(image) + "|" + baitID
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if last, ok := e.seen[key]; ok && now.Sub(last) < repeatWindow {
 		return true
+	}
+	for k, t := range e.seen {
+		if now.Sub(t) >= repeatWindow {
+			delete(e.seen, k)
+		}
+	}
+	if len(e.seen) >= maxSeenEntries {
+		var oldestKey string
+		var oldestTime time.Time
+		for k, t := range e.seen {
+			if oldestKey == "" || t.Before(oldestTime) {
+				oldestKey, oldestTime = k, t
+			}
+		}
+		if oldestKey != "" {
+			delete(e.seen, oldestKey)
+		}
 	}
 	e.seen[key] = now
 	return false

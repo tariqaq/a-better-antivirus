@@ -6,6 +6,7 @@ package baits
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -211,8 +212,36 @@ func rawSetGroups(gids []int) error {
 	return nil
 }
 
-func safeMkdirAll(dir string) error                   { return os.MkdirAll(dir, 0o755) }
-func safeReadFile(path string) ([]byte, error)        { return os.ReadFile(path) }
+func safeMkdirAll(dir string) error            { return os.MkdirAll(dir, 0o755) }
+func safeReadFile(path string) ([]byte, error) { return os.ReadFile(path) }
+func safeReadFileLimit(path string, maxBytes int64) ([]byte, error) {
+	fi, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s is not a regular file", path)
+	}
+	if maxBytes >= 0 && fi.Size() > maxBytes {
+		return nil, fmt.Errorf("%s exceeds size limit", path)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	if maxBytes < 0 {
+		return io.ReadAll(f)
+	}
+	b, err := io.ReadAll(io.LimitReader(f, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(b)) > maxBytes {
+		return nil, fmt.Errorf("%s exceeds size limit", path)
+	}
+	return b, nil
+}
 func safeWriteFileNew(path string, data []byte) error { return os.WriteFile(path, data, 0o644) }
 func safeOverwriteInPlace(path string, data []byte) error {
 	return os.WriteFile(path, data, 0o644)

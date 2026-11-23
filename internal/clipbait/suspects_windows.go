@@ -72,6 +72,32 @@ func uiCritical(img string) bool {
 	return false
 }
 
+// protectedClipPID reports whether pid belongs to a protected OS process or a
+// Microsoft UI-critical binary that clipboard guard must never suspend.
+func protectedClipPID(pid uint32) bool {
+	if pid == 0 || pid == 4 {
+		return true
+	}
+	img, err := procinfo.ImagePath(pid)
+	if err != nil || img == "" {
+		return false
+	}
+	return protectedClipImage(img, provenance.Verify)
+}
+
+func protectedClipImage(img string, verify func(string) provenance.Result) bool {
+	cls := &classify.Classifier{Env: classify.DefaultEnv()}
+	if cls.ProtectedProcess(img) {
+		return true
+	}
+	winDir, _ := windows.GetWindowsDirectory()
+	if winDir != "" && within(img, winDir) && uiCritical(img) {
+		sig := verify(img)
+		return sig.Valid && strings.Contains(sig.Signer, "Microsoft")
+	}
+	return false
+}
+
 // IdleTime is how long it's been since anyone typed, clicked or moved the
 // mouse in this session.
 func IdleTime() time.Duration {

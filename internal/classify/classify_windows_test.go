@@ -251,3 +251,40 @@ func TestWindowsFolderBeforeTheSignatureIsKnown(t *testing.T) {
 		t.Fatalf("an unsigned file where notepad should be: %+v", v)
 	}
 }
+
+func TestInvalidSignatureNeverMatchesSignerRule(t *testing.T) {
+	c := &Classifier{Env: env, Ignore: []config.IgnoreRule{
+		{Path: `C:\Program Files\Backblaze\bztransmit64.exe`, Signer: "Backblaze", Tricks: true},
+		{Path: `C:\Program Files\Foo\foo.exe`, Signer: "Foo", Baits: []string{"aws"}},
+	}}
+	invalidBB := provenance.Result{Signed: true, Valid: false, Signer: "Backblaze, Inc.", Error: "untrusted root"}
+	invalidFoo := provenance.Result{Signed: true, Valid: false, Signer: "Foo Ltd", Error: "untrusted root"}
+
+	if v := c.Final(`C:\Program Files\Backblaze\bztransmit64.exe`, 1, Bait{ID: "aws"}, invalidBB); v.ByRule || v.Ignored {
+		t.Fatalf("invalid signature matched signer ignore rule (all-bait): %+v", v)
+	}
+	if v := c.Final(`C:\Program Files\Foo\foo.exe`, 1, Bait{ID: "aws"}, invalidFoo); v.ByRule || v.Ignored {
+		t.Fatalf("invalid signature matched signer ignore rule (single-bait): %+v", v)
+	}
+	if c.SweepExempt(`C:\Program Files\Backblaze\bztransmit64.exe`, 1, &invalidBB) {
+		t.Fatal("invalid signature must not be sweep-exempt")
+	}
+	if c.TricksAllowed(`C:\Program Files\Backblaze\bztransmit64.exe`, 1, "aws", &invalidBB) {
+		t.Fatal("invalid signature must not be allowed tricks")
+	}
+
+	validBB := provenance.Result{Signed: true, Valid: true, Signer: "Backblaze, Inc."}
+	validFoo := provenance.Result{Signed: true, Valid: true, Signer: "Foo Ltd"}
+	if v := c.Final(`C:\Program Files\Backblaze\bztransmit64.exe`, 1, Bait{ID: "aws"}, validBB); !v.ByRule || !v.Ignored {
+		t.Fatalf("valid signature should match all-bait rule: %+v", v)
+	}
+	if v := c.Final(`C:\Program Files\Foo\foo.exe`, 1, Bait{ID: "aws"}, validFoo); !v.ByRule || !v.Ignored {
+		t.Fatalf("valid signature should match single-bait rule: %+v", v)
+	}
+	if !c.SweepExempt(`C:\Program Files\Backblaze\bztransmit64.exe`, 1, &validBB) {
+		t.Fatal("valid signature should be sweep-exempt")
+	}
+	if !c.TricksAllowed(`C:\Program Files\Backblaze\bztransmit64.exe`, 1, "aws", &validBB) {
+		t.Fatal("valid signature should allow tricks")
+	}
+}

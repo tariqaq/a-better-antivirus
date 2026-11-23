@@ -19,6 +19,7 @@ import (
 	"golang.org/x/sys/windows"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/procinfo"
+	"github.com/vulnix0x4/a-better-antivirus/internal/provenance"
 )
 
 var (
@@ -613,5 +614,59 @@ func TestCarefulClipperNeedsRealBaits(t *testing.T) {
 			t.Fatalf("%s: a real bait should catch the careful clipper (pid %d): %+v, %v", coin, cs[0].pid, f, err)
 		}
 		g.Finish()
+	}
+}
+
+func TestProtectedClipImage(t *testing.T) {
+	winDir, err := windows.GetWindowsDirectory()
+	if err != nil || winDir == "" {
+		t.Fatalf("GetWindowsDirectory: %v", err)
+	}
+	msValid := func(string) provenance.Result {
+		return provenance.Result{Signed: true, Valid: true, Signer: "Microsoft Windows"}
+	}
+	msInvalid := func(string) provenance.Result {
+		return provenance.Result{Signed: true, Valid: false, Signer: "Microsoft Windows"}
+	}
+	otherValid := func(string) provenance.Result {
+		return provenance.Result{Signed: true, Valid: true, Signer: "Third Party Corp"}
+	}
+
+	for _, img := range []string{
+		filepath.Join(winDir, "explorer.exe"),
+		filepath.Join(winDir, "System32", "svchost.exe"),
+		filepath.Join(winDir, "System32", "dwm.exe"),
+		filepath.Join(winDir, "SystemApps", "InputApp", "textinputhost.exe"),
+	} {
+		if !protectedClipImage(img, msValid) {
+			t.Errorf("%s should be protected", img)
+		}
+	}
+
+	for _, img := range []string{
+		`C:\Users\bob\Temp\explorer.exe`,
+		`C:\Users\bob\Temp\textinputhost.exe`,
+	} {
+		if protectedClipImage(img, msValid) {
+			t.Errorf("%s must not be protected", img)
+		}
+	}
+
+	uiImg := filepath.Join(winDir, "SystemApps", "InputApp", "textinputhost.exe")
+	if protectedClipImage(uiImg, msInvalid) {
+		t.Errorf("%s with invalid signature must not be protected", uiImg)
+	}
+	if protectedClipImage(uiImg, otherValid) {
+		t.Errorf("%s with non-Microsoft signer must not be protected", uiImg)
+	}
+}
+
+func TestOversizedClipboardSkipped(t *testing.T) {
+	g := newGuard(t, &Guard{})
+	g.put(t, strings.Repeat("a", maxSavedBytes+1024))
+	_, err := g.Cycle(Bitcoin)
+	var sk Skipped
+	if !errors.As(err, &sk) {
+		t.Fatalf("Cycle with oversized clipboard = %v, want Skipped", err)
 	}
 }

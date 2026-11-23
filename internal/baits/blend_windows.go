@@ -108,8 +108,9 @@ func asOwner(path string, fn func()) error {
 	return nil
 }
 
-func safeMkdirAll(dir string) error                   { return winsec.MkdirAllNoReparse(dir) }
-func safeReadFile(path string) ([]byte, error)        { return winsec.ReadFileNoReparse(path) }
+func safeMkdirAll(dir string) error                        { return winsec.MkdirAllNoReparse(dir) }
+func safeReadFile(path string) ([]byte, error)             { return winsec.ReadFileNoReparse(path) }
+func safeReadFileLimit(path string, n int64) ([]byte, error) { return winsec.ReadFileNoReparseLimit(path, n) }
 func safeWriteFileNew(path string, data []byte) error { return winsec.WriteFileNewNoReparse(path, data) }
 func safeOverwriteInPlace(path string, data []byte) error {
 	return winsec.OverwriteFileNoReparse(path, data)

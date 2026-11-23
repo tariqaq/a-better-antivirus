@@ -17,6 +17,9 @@ import (
 // symlink, or other reparse point.
 var ErrReparsePoint = errors.New("path contains a reparse point (junction or symlink)")
 
+// ErrFileTooLarge is returned when a file exceeds the configured read cap.
+var ErrFileTooLarge = errors.New("file exceeds size limit")
+
 const (
 	objCaseInsensitive = 0x00000040
 
@@ -227,6 +230,38 @@ func ReadFileNoReparse(path string) ([]byte, error) {
 	f := os.NewFile(uintptr(h), path)
 	defer f.Close()
 	return io.ReadAll(f)
+}
+
+// ReadFileNoReparseLimit reads up to maxBytes from an existing regular file
+// without following reparse points, returning ErrFileTooLarge if exceeded.
+func ReadFileNoReparseLimit(path string, maxBytes int64) ([]byte, error) {
+	h, err := OpenFileNoReparse(path, windows.GENERIC_READ|windows.SYNCHRONIZE, 0)
+	if err != nil {
+		return nil, err
+	}
+	var fi windows.ByHandleFileInformation
+	if err := windows.GetFileInformationByHandle(h, &fi); err != nil {
+		windows.CloseHandle(h)
+		return nil, err
+	}
+	size := int64(fi.FileSizeHigh)<<32 | int64(fi.FileSizeLow)
+	if maxBytes >= 0 && size > maxBytes {
+		windows.CloseHandle(h)
+		return nil, ErrFileTooLarge
+	}
+	f := os.NewFile(uintptr(h), path)
+	defer f.Close()
+	if maxBytes < 0 {
+		return io.ReadAll(f)
+	}
+	b, err := io.ReadAll(io.LimitReader(f, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(b)) > maxBytes {
+		return nil, ErrFileTooLarge
+	}
+	return b, nil
 }
 
 // WriteFileNewNoReparse creates a brand-new regular file (failing if it already

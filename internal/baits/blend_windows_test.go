@@ -422,3 +422,52 @@ func TestJunctionRefusedAcrossBaitOps(t *testing.T) {
 		}
 	}
 }
+
+func TestMetadataReadsRejectOversizedAndJunction(t *testing.T) {
+	root := t.TempDir()
+
+	// Oversized Local State and profiles.ini must be rejected.
+	bigChrome := filepath.Join(root, "chrome-big")
+	if err := os.MkdirAll(bigChrome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	big := make([]byte, maxMetadataBytes+1024)
+	if err := os.WriteFile(filepath.Join(bigChrome, "Local State"), big, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := readLocalState(bigChrome); ok {
+		t.Fatal("readLocalState accepted oversized Local State")
+	}
+	bigFF := filepath.Join(root, "ff-big")
+	if err := os.MkdirAll(bigFF, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bigFF, firefoxIndex), big, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if profs := firefoxProfiles(bigFF); len(profs) != 0 {
+		t.Fatalf("firefoxProfiles accepted oversized profiles.ini: %v", profs)
+	}
+
+	// Junctioned metadata dirs must be refused.
+	target := filepath.Join(root, "outside-meta")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "Local State"), []byte(`{"profile":{"info_cache":{"Profile 1":{}}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, firefoxIndex), []byte("[Profile0]\nPath=Profiles/abc.default\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "meta-link")
+	if out, err := exec.Command("cmd.exe", "/c", "mklink", "/J", link, target).CombinedOutput(); err != nil {
+		t.Fatalf("mklink /J: %v (%s)", err, out)
+	}
+	if _, ok := readLocalState(link); ok {
+		t.Fatal("readLocalState followed junction")
+	}
+	if profs := firefoxProfiles(link); len(profs) != 0 {
+		t.Fatalf("firefoxProfiles followed junction: %v", profs)
+	}
+}
