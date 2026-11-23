@@ -71,7 +71,7 @@ func ntOpenRelative(parent windows.Handle, name string, access uint32, dispositi
 	}
 	var iosb windows.IO_STATUS_BLOCK
 	var h windows.Handle
-	err = windows.NtCreateFile(&h, access, &oa, &iosb, nil, windows.FILE_ATTRIBUTE_NORMAL, fileShareAll, disposition, options, nil, 0)
+	err = windows.NtCreateFile(&h, access, &oa, &iosb, nil, windows.FILE_ATTRIBUTE_NORMAL, fileShareAll, disposition, options, 0, 0)
 	if err != nil {
 		return 0, ntErr(err)
 	}

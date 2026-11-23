@@ -392,6 +392,12 @@ func Remove(bs *config.BaitState) (err error) {
 func remove(bs *config.BaitState) error {
 	var firstErr error
 	for _, f := range bs.Files {
+		if _, err := safeStat(f.Path); isReparseErr(err) {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
 		if f.Audit {
 			ClearTripwire(f.Path)
 		}
@@ -420,7 +426,7 @@ func remove(bs *config.BaitState) error {
 		// them for deleted by someone and put them back.
 		left := bs.Files[:0]
 		for _, f := range bs.Files {
-			if _, err := os.Lstat(f.Path); err == nil {
+			if _, err := safeStat(f.Path); err == nil || isReparseErr(err) {
 				left = append(left, f)
 			}
 		}
