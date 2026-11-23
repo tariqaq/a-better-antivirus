@@ -143,6 +143,9 @@ func Save(a *Alert) error {
 
 // Load reads an alert by full ID or unique prefix/suffix.
 func Load(id string) (*Alert, error) {
+	if id == "" || strings.ContainsAny(id, `/\`) || strings.Contains(id, "..") {
+		return nil, fmt.Errorf("invalid alert id %q", id)
+	}
 	b, err := os.ReadFile(file(id))
 	if errors.Is(err, os.ErrNotExist) {
 		all, _ := ids()

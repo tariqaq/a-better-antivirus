@@ -439,13 +439,7 @@ func (w *Watcher) setArmed(path string, on bool) {
 // Holders lists the programs that have path open, without disturbing them
 // (the open asks only for attributes, which breaks no oplock and reads nothing).
 func Holders(path string) []uint32 {
-	p, err := windows.UTF16PtrFromString(path)
-	if err != nil {
-		return nil
-	}
-	h, err := windows.CreateFile(p, windows.FILE_READ_ATTRIBUTES,
-		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
-		nil, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
+	h, err := winsec.OpenFileNoReparse(path, windows.FILE_READ_ATTRIBUTES|windows.SYNCHRONIZE, 0)
 	if err != nil {
 		return nil
 	}

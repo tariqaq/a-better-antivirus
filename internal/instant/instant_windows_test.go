@@ -192,3 +192,32 @@ func TestPinpointsOpenerNotBystander(t *testing.T) {
 		t.Fatalf("pinpointed the reader alone in only %d/%d runs", exact, runs)
 	}
 }
+
+func TestHoldersRejectsJunction(t *testing.T) {
+	root := t.TempDir()
+	targetDir := filepath.Join(root, "target")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	targetFile := filepath.Join(targetDir, "secret.txt")
+	if err := os.WriteFile(targetFile, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(targetFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	if pids := Holders(targetFile); len(pids) == 0 {
+		t.Fatal("Holders(targetFile) returned no PIDs while file is open")
+	}
+
+	linkDir := filepath.Join(root, "junction")
+	if out, err := exec.Command("cmd.exe", "/c", "mklink", "/J", linkDir, targetDir).CombinedOutput(); err != nil {
+		t.Fatalf("mklink /J: %v (%s)", err, out)
+	}
+	if pids := Holders(filepath.Join(linkDir, "secret.txt")); len(pids) != 0 {
+		t.Fatalf("Holders followed junction and reported %v", pids)
+	}
+}
