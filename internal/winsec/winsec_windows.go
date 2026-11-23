@@ -84,13 +84,16 @@ func SetBaitAudit(path string) error {
 	if err != nil {
 		return err
 	}
-	h, err := OpenFileNoReparse(path, AccessSystemSecurity|windows.FILE_READ_ATTRIBUTES|windows.SYNCHRONIZE, 0)
+	h, err := OpenFileNoReparse(path, AccessSystemSecurity|AccessReadControl|windows.FILE_READ_ATTRIBUTES|windows.SYNCHRONIZE, 0)
 	if err != nil {
-		return err
+		return fmt.Errorf("open %s: %w", path, err)
 	}
 	defer windows.CloseHandle(h)
-	return windows.SetSecurityInfo(h, windows.SE_FILE_OBJECT,
-		windows.SACL_SECURITY_INFORMATION|windows.PROTECTED_SACL_SECURITY_INFORMATION, nil, nil, nil, sacl)
+	if err := windows.SetSecurityInfo(h, windows.SE_FILE_OBJECT,
+		windows.SACL_SECURITY_INFORMATION|windows.PROTECTED_SACL_SECURITY_INFORMATION, nil, nil, nil, sacl); err != nil {
+		return fmt.Errorf("SetSecurityInfo %s: %w", path, err)
+	}
+	return nil
 }
 
 // ClearAudit removes all audit entries from the file's SACL.
@@ -98,15 +101,18 @@ func ClearAudit(path string) error {
 	if err := EnablePrivilege(SeSecurityPrivilege); err != nil {
 		return err
 	}
-	h, err := OpenFileNoReparse(path, AccessSystemSecurity|windows.FILE_READ_ATTRIBUTES|windows.SYNCHRONIZE, 0)
+	h, err := OpenFileNoReparse(path, AccessSystemSecurity|AccessReadControl|windows.FILE_READ_ATTRIBUTES|windows.SYNCHRONIZE, 0)
 	if err != nil {
-		return err
+		return fmt.Errorf("open %s: %w", path, err)
 	}
 	defer windows.CloseHandle(h)
 	// ACLFromEntries(nil, nil) dereferences a NULL ACL, so build an empty one
 	// by hand: an 8-byte header with revision 2 and zero entries.
-	return windows.SetSecurityInfo(h, windows.SE_FILE_OBJECT,
-		windows.SACL_SECURITY_INFORMATION|windows.UNPROTECTED_SACL_SECURITY_INFORMATION, nil, nil, nil, EmptyACL())
+	if err := windows.SetSecurityInfo(h, windows.SE_FILE_OBJECT,
+		windows.SACL_SECURITY_INFORMATION|windows.UNPROTECTED_SACL_SECURITY_INFORMATION, nil, nil, nil, EmptyACL()); err != nil {
+		return fmt.Errorf("SetSecurityInfo %s: %w", path, err)
+	}
+	return nil
 }
 
 // HasBaitAudit reports whether the file's SACL still audits everything in
@@ -116,14 +122,14 @@ func HasBaitAudit(path string) (bool, error) {
 	if err := EnablePrivilege(SeSecurityPrivilege); err != nil {
 		return false, err
 	}
-	h, err := OpenFileNoReparse(path, AccessSystemSecurity|windows.FILE_READ_ATTRIBUTES|windows.SYNCHRONIZE, 0)
+	h, err := OpenFileNoReparse(path, AccessSystemSecurity|AccessReadControl|windows.FILE_READ_ATTRIBUTES|windows.SYNCHRONIZE, 0)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("open %s: %w", path, err)
 	}
 	defer windows.CloseHandle(h)
 	sd, err := windows.GetSecurityInfo(h, windows.SE_FILE_OBJECT, windows.SACL_SECURITY_INFORMATION)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("GetSecurityInfo %s: %w", path, err)
 	}
 	sacl, _, err := sd.SACL()
 	if err != nil || sacl == nil {
