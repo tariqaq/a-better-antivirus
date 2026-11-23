@@ -51,6 +51,9 @@ var bech32 = regexp.MustCompile(`^(bc1|BC1)[02-9ac-hj-np-zAC-HJ-NP-Z]{25,87}$`)
 // clipper swaps an address for one of its own; anything else replacing a bait
 // is somebody copying something.
 func Looks(s string) bool {
+	if len(s) > 256 {
+		return false
+	}
 	s = strings.TrimSpace(s)
 	if bech32.MatchString(s) {
 		return true

@@ -160,6 +160,39 @@ func TestLnkTargetIgnoresGarbage(t *testing.T) {
 			t.Errorf("LnkTarget(%q) = %q", b, got)
 		}
 	}
+	// Crafted LinkInfoSize < 28 or oversized must never panic.
+	for _, linkInfoSize := range []uint32{0, 12, 27, 0xffffffff} {
+		b := make([]byte, 0x4C+28)
+		b[0] = 0x4C         // HeaderSize
+		b[20] = 1 << 1      // HasLinkInfo
+		b[0x4C+8] = 1       // VolumeIDAndLocalBasePath
+		b[0x4C] = byte(linkInfoSize)
+		b[0x4C+1] = byte(linkInfoSize >> 8)
+		b[0x4C+2] = byte(linkInfoSize >> 16)
+		b[0x4C+3] = byte(linkInfoSize >> 24)
+		if got := LnkTarget(b); got != "" {
+			t.Errorf("LnkTarget(linkInfoSize=%#x) = %q, want empty", linkInfoSize, got)
+		}
+	}
+}
+
+func TestCleanRecentSkipsOversizedLnk(t *testing.T) {
+	root := t.TempDir()
+	recent := filepath.Join(root, `Roaming\Microsoft\Windows\Recent`)
+	if err := os.MkdirAll(recent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	huge := filepath.Join(recent, "huge.lnk")
+	if err := os.WriteFile(huge, make([]byte, maxLnkBytes+1024), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	removed := CleanRecent(filepath.Join(root, "Roaming"), map[string]string{`c:\users\bob\passwords.txt`: "desktop-passwords"})
+	if len(removed) != 0 {
+		t.Fatalf("CleanRecent removed oversized file: %v", removed)
+	}
+	if _, err := os.Stat(huge); err != nil {
+		t.Fatalf("oversized .lnk disappeared: %v", err)
+	}
 }
 
 func TestMetamaskFollowsHostBrowser(t *testing.T) {

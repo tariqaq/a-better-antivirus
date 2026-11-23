@@ -133,6 +133,7 @@ func (s *Subscription) Run(ctx context.Context, fn func(xml string)) error {
 		if ev == windows.WAIT_OBJECT_0+1 {
 			return ctx.Err()
 		}
+		windows.ResetEvent(s.signal)
 		for {
 			var n uint32
 			r, _, e := procEvtNext.Call(uintptr(s.sub), uintptr(len(events)), uintptr(unsafe.Pointer(&events[0])), 0, 0, uintptr(unsafe.Pointer(&n)))
@@ -162,7 +163,6 @@ func (s *Subscription) Run(ctx context.Context, fn func(xml string)) error {
 				}
 			}
 		}
-		windows.ResetEvent(s.signal)
 	}
 }
 

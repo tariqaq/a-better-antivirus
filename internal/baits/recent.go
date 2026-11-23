@@ -10,6 +10,8 @@ import (
 	"github.com/vulnix0x4/a-better-antivirus/internal/paths"
 )
 
+const maxLnkBytes = 1 << 20
+
 // CleanRecent deletes Recent-files shortcuts (.lnk) that point at baits.
 // Windows adds a shortcut when you open a file, and apps like Copilot read
 // "recent files": that's exactly how the Copilot false alarm happened.
@@ -28,7 +30,7 @@ func CleanRecent(roamingAppData string, baitPaths map[string]string) (removed []
 			continue
 		}
 		p := filepath.Join(dir, e.Name())
-		b, err := safeReadFile(p)
+		b, err := safeReadFileLimit(p, maxLnkBytes)
 		if err != nil {
 			continue
 		}
@@ -68,7 +70,7 @@ func LnkTarget(b []byte) string {
 	size := int(le.Uint32(li))
 	hdr := le.Uint32(li[4:])
 	liFlags := le.Uint32(li[8:])
-	if size > len(li) || liFlags&1 == 0 { // VolumeIDAndLocalBasePath
+	if size < 28 || size > len(li) || liFlags&1 == 0 { // VolumeIDAndLocalBasePath
 		return ""
 	}
 	li = li[:size]

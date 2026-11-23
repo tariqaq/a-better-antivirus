@@ -107,6 +107,9 @@ func (s *server) listenClipGuard(h *session.Helper) {
 			fmt.Fprintln(h.In, "done") // frozen (or not, as configured): the guard may let go
 		}
 	}
+	if err := sc.Err(); err != nil {
+		s.log.Printf("clipboard guard (session %d): read error: %v", h.Session, err)
+	}
 }
 
 // onClipper raises the alert for a clipper a guard caught, and responds as

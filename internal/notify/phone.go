@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/alerts"
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
@@ -230,7 +231,11 @@ func (s *Sender) discord(ctx context.Context, m Message) error {
 	}
 	payload := map[string]any{
 		"username": "A Better Antivirus",
-		"embeds":   []map[string]any{{"title": m.Title, "description": m.Body, "color": color}},
+		"embeds": []map[string]any{{
+			"title":       truncateRunes(m.Title, 250),
+			"description": truncateRunes(m.Body, 4000),
+			"color":       color,
+		}},
 	}
 	b, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(ctx, "POST", s.Phone.Discord.WebhookURL, bytes.NewReader(b))
@@ -239,6 +244,24 @@ func (s *Sender) discord(ctx context.Context, m Message) error {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	return s.do(req)
+}
+
+func truncateRunes(s string, max int) string {
+	if max <= 0 || utf8.RuneCountInString(s) <= max {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	n := 0
+	for _, r := range s {
+		if n >= max-1 {
+			break
+		}
+		b.WriteRune(r)
+		n++
+	}
+	b.WriteRune('…')
+	return b.String()
 }
 
 func (s *Sender) email(ctx context.Context, m Message) error {

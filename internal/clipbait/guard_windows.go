@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strings"
 	"time"
 	"unsafe"
 
@@ -333,7 +334,7 @@ func (g *Guard) cycle(c Coin) (*Finding, error) {
 		g.have, g.baits = false, nil
 		return nil, Skipped("something else was copied")
 	}
-	f := &Finding{Time: time.Now(), Coin: c, Bait: bait, Replacement: o.text, Latency: o.latency, Keyed: g.NewBait != nil}
+	f := &Finding{Time: time.Now(), Coin: c, Bait: bait, Replacement: strings.TrimSpace(o.text), Latency: o.latency, Keyed: g.NewBait != nil}
 	g.identify(f, o)
 	if f.Replacement == "" && f.PID == 0 {
 		// Wiped, but by nothing that could be pinned down: that alone isn't

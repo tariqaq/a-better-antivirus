@@ -88,3 +88,34 @@ func TestFromAlertNamesTheMachineAndTheDownload(t *testing.T) {
 		t.Fatalf("no name: %q", m.Title)
 	}
 }
+
+func TestDiscordTruncatesOversizedEmbeds(t *testing.T) {
+	var body []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ = io.ReadAll(r.Body)
+	}))
+	defer srv.Close()
+
+	s := NewSender(config.PhoneConfig{Kind: "discord", Discord: config.DiscordConfig{WebhookURL: srv.URL + "/api/webhooks/1/abc"}}, nil)
+	longTitle := strings.Repeat("é", 400)
+	longBody := strings.Repeat("x", 6000)
+	if err := s.Send(context.Background(), Message{Title: longTitle, Body: longBody, Priority: 5}); err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Embeds []struct {
+			Title       string `json:"title"`
+			Description string `json:"description"`
+		} `json:"embeds"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatal(err)
+	}
+	emb := payload.Embeds[0]
+	if got := len([]rune(emb.Title)); got != 250 || !strings.HasSuffix(emb.Title, "…") {
+		t.Fatalf("discord title runes = %d (want 250 with ellipsis)", got)
+	}
+	if got := len([]rune(emb.Description)); got != 4000 || !strings.HasSuffix(emb.Description, "…") {
+		t.Fatalf("discord description runes = %d (want 4000 with ellipsis)", got)
+	}
+}

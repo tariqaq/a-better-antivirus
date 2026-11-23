@@ -136,6 +136,19 @@ func (s *server) healthCheck(startup bool) {
 					bs.Status, bs.StatusNote = "error", err.Error()
 					continue
 				case rerr != nil:
+					var hits []alerts.BaitHit
+					for _, p := range probs {
+						if p.Kind == "reparse" {
+							hits = append(hits, alerts.BaitHit{ID: id, Name: bs.Name, Path: p.File, Access: p.Kind, Time: time.Now()})
+						}
+					}
+					if len(hits) > 0 && !startup && s.once("reparse|"+id, 6*time.Hour) {
+						name, h := bs.Name, hits
+						raised = append(raised, func() {
+							s.eng.SystemAlert(alerts.KindTamper, config.TierCritical, "Bait replaced by a link or junction: "+name,
+								"ABA refused to follow a junction or symbolic link placed at a bait path. Malware uses this trick to redirect privileged file operations or disable baits.", h)
+						})
+					}
 					bs.Status, bs.StatusNote = "error", rerr.Error()
 					continue
 				}

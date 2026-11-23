@@ -94,7 +94,8 @@ func TestLooks(t *testing.T) {
 			t.Errorf("%q should look like an address", s)
 		}
 	}
-	for _, s := range []string{"", "hello", "https://example.com", "0x123", "pay 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa now"} {
+	for _, s := range []string{"", "hello", "https://example.com", "0x123", "pay 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa now",
+		strings.Repeat(" ", 1024) + "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"} {
 		if Looks(s) {
 			t.Errorf("%q shouldn't look like an address", s)
 		}
