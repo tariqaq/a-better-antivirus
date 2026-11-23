@@ -35,6 +35,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/vulnix0x4/a-better-antivirus/internal/winsec"
 )
 
 // ---- oplock guard on one file ----
@@ -77,16 +79,9 @@ var ErrNotGranted = errors.New("oplock not granted (file is open elsewhere)")
 // Arm opens path and requests an exclusive oplock. The open asks for read
 // access but never reads, so it doesn't produce an audit event.
 func Arm(path string) (*Guard, error) {
-	p, err := windows.UTF16PtrFromString(path)
-	if err != nil {
-		return nil, err
-	}
-	// Backup semantics: with the backup privilege (the service has it) the open
-	// succeeds whatever the file's permissions say, so a program running as you
-	// can't lock ABA out of a bait by rewriting them.
-	h, err := windows.CreateFile(p, windows.GENERIC_READ,
-		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
-		nil, windows.OPEN_EXISTING, windows.FILE_FLAG_OVERLAPPED|windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
+	// Open without following NTFS reparse points, using backup semantics so
+	// user-owned paths cannot redirect the SYSTEM service.
+	h, err := winsec.OpenFileNoReparseAsync(path, windows.GENERIC_READ)
 	if err != nil {
 		return nil, err
 	}

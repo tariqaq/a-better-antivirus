@@ -157,3 +157,15 @@ func asOwner(path string, fn func()) error {
 	}()
 	return <-errc
 }
+
+func safeMkdirAll(dir string) error                   { return os.MkdirAll(dir, 0o755) }
+func safeReadFile(path string) ([]byte, error)        { return os.ReadFile(path) }
+func safeWriteFileNew(path string, data []byte) error { return os.WriteFile(path, data, 0o644) }
+func safeOverwriteInPlace(path string, data []byte) error {
+	return os.WriteFile(path, data, 0o644)
+}
+func safeRemoveFile(path string) error            { return os.Remove(path) }
+func safeRemoveEmptyDir(dir string) error         { return os.Remove(dir) }
+func safeStat(path string) (os.FileInfo, error)   { return os.Lstat(path) }
+func safeReadDir(dir string) ([]os.DirEntry, error) { return os.ReadDir(dir) }
+func isReparseErr(error) bool                     { return false }

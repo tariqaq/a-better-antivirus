@@ -1,7 +1,9 @@
 package baits
 
 import (
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -12,6 +14,7 @@ import (
 	"golang.org/x/sys/windows"
 
 	"github.com/vulnix0x4/a-better-antivirus/internal/config"
+	"github.com/vulnix0x4/a-better-antivirus/internal/winsec"
 )
 
 // Creating "Discord\Update.exe" takes no admin rights. An empty or unsigned
@@ -318,5 +321,104 @@ func TestBlendUpgradesAnOlderInstall(t *testing.T) {
 	Blend(bs, viv, u, g)
 	if b, _ := os.ReadFile(mine); string(b) != "the real app's data now" {
 		t.Fatal("Blend rewrote a file that was no longer ABA's")
+	}
+}
+
+func TestJunctionRefusedAcrossBaitOps(t *testing.T) {
+	u := testUser(t)
+	outside := filepath.Join(t.TempDir(), "outside")
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := filepath.Join(outside, "sentinel.txt")
+	if err := os.WriteFile(sentinel, []byte("untouched"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sfi, err := os.Stat(sentinel)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	baitDir := filepath.Join(u.Documents, "decoy")
+	if out, err := exec.Command("cmd.exe", "/c", "mklink", "/J", baitDir, outside).CombinedOutput(); err != nil {
+		t.Fatalf("mklink /J: %v (%s)", err, out)
+	}
+	viaLink := filepath.Join(baitDir, "sentinel.txt")
+	spec := Spec{
+		ID:   "junction-test",
+		Name: "junction test",
+		Kind: KindFile,
+		Files: func(config.UserInfo) []FileSpec {
+			return []FileSpec{{Path: viaLink, Text: true, Gen: func(*Gen) []byte { return []byte("bait") }}}
+		},
+	}
+
+	g := NewGen()
+	if _, err := Create(spec, u, g); !errors.Is(err, winsec.ErrReparsePoint) {
+		t.Fatalf("Create through junction = %v, want ErrReparsePoint", err)
+	}
+	newViaLink := filepath.Join(baitDir, "created.txt")
+	specNew := Spec{
+		ID:   "junction-new",
+		Name: "junction new",
+		Kind: KindFile,
+		Files: func(config.UserInfo) []FileSpec {
+			return []FileSpec{{Path: newViaLink, Text: true, Gen: func(*Gen) []byte { return []byte("bait") }}}
+		},
+	}
+	if _, err := Create(specNew, u, g); !errors.Is(err, winsec.ErrReparsePoint) {
+		t.Fatalf("Create new file through junction = %v, want ErrReparsePoint", err)
+	}
+	if _, err := os.Stat(filepath.Join(outside, "created.txt")); !os.IsNotExist(err) {
+		t.Fatal("Create wrote a new file through junction")
+	}
+
+	bs := &config.BaitState{
+		ID:     "junction-test",
+		Name:   "junction test",
+		Status: "ok",
+		Files:  []config.BaitFile{{Path: viaLink, Created: true, Size: sfi.Size(), ModTime: sfi.ModTime()}},
+	}
+	probs := Check(bs)
+	if len(probs) != 1 || probs[0].Kind != "reparse" {
+		t.Fatalf("Check = %+v, want one reparse problem", probs)
+	}
+	if err := Repair(bs, spec, u, g, probs); err == nil {
+		t.Fatal("Repair succeeded across junction")
+	}
+	if Blend(bs, spec, u, g) {
+		t.Fatal("Blend modified a file across junction")
+	}
+	if err := Remove(bs); !errors.Is(err, winsec.ErrReparsePoint) {
+		t.Fatalf("Remove through junction = %v, want ErrReparsePoint", err)
+	}
+	if b, err := os.ReadFile(sentinel); err != nil || string(b) != "untouched" {
+		t.Fatalf("sentinel was modified or deleted: err=%v data=%q", err, b)
+	}
+
+	// CleanRecent must also refuse to read or delete .lnk files through a junction.
+	recentDir := filepath.Join(u.RoamingAppData, `Microsoft\Windows\Recent`)
+	if err := os.MkdirAll(filepath.Dir(recentDir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("cmd.exe", "/c", "mklink", "/J", recentDir, outside).CombinedOutput(); err != nil {
+		t.Fatalf("mklink /J recent: %v (%s)", err, out)
+	}
+	baitLnk := filepath.Join(outside, "passwords.lnk")
+	makeShortcut(t, baitLnk, sentinel)
+	if _, err := os.Stat(baitLnk); err == nil {
+		removed := CleanRecent(u.RoamingAppData, map[string]string{strings.ToLower(sentinel): "test"})
+		if len(removed) != 0 {
+			t.Fatalf("CleanRecent followed junction and removed %v", removed)
+		}
+		if _, err := os.Stat(baitLnk); err != nil {
+			t.Fatalf("CleanRecent deleted %s through junction", baitLnk)
+		}
+	}
+
+	if winsec.IsElevated() {
+		if err := SetTripwire(viaLink); !errors.Is(err, winsec.ErrReparsePoint) {
+			t.Fatalf("SetTripwire through junction = %v, want ErrReparsePoint", err)
+		}
 	}
 }

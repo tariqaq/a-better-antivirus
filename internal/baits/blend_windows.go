@@ -1,9 +1,10 @@
 package baits
 
 import (
+	"errors"
+	"os"
 	"path/filepath"
 	"time"
-	"unsafe"
 
 	"golang.org/x/sys/windows"
 
@@ -28,8 +29,7 @@ func fileTime(t time.Time) *windows.Filetime {
 }
 
 func setTimes(path string, created, accessed, written time.Time) {
-	p, _ := windows.UTF16PtrFromString(path)
-	h, err := windows.CreateFile(p, windows.FILE_WRITE_ATTRIBUTES, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
+	h, err := winsec.OpenNoReparse(path, windows.FILE_WRITE_ATTRIBUTES|windows.FILE_READ_ATTRIBUTES|windows.SYNCHRONIZE, 0)
 	if err != nil {
 		return
 	}
@@ -38,12 +38,16 @@ func setTimes(path string, created, accessed, written time.Time) {
 }
 
 func getTimes(path string) (created, written time.Time, ok bool) {
-	var d windows.Win32FileAttributeData
-	p, err := windows.UTF16PtrFromString(path)
-	if err != nil || windows.GetFileAttributesEx(p, windows.GetFileExInfoStandard, (*byte)(unsafe.Pointer(&d))) != nil {
+	h, err := winsec.OpenNoReparse(path, windows.FILE_READ_ATTRIBUTES|windows.SYNCHRONIZE, 0)
+	if err != nil {
 		return created, written, false
 	}
-	return time.Unix(0, d.CreationTime.Nanoseconds()), time.Unix(0, d.LastWriteTime.Nanoseconds()), true
+	defer windows.CloseHandle(h)
+	var fi windows.ByHandleFileInformation
+	if windows.GetFileInformationByHandle(h, &fi) != nil {
+		return created, written, false
+	}
+	return time.Unix(0, fi.CreationTime.Nanoseconds()), time.Unix(0, fi.LastWriteTime.Nanoseconds()), true
 }
 
 // ownedBy makes sid the owner of path, when it isn't already. (Needs the
@@ -56,40 +60,62 @@ func ownedBy(path, sid string) {
 	if err != nil {
 		return
 	}
-	if sd, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION); err == nil {
+	winsec.EnablePrivilege("SeRestorePrivilege")
+	h, err := winsec.OpenNoReparse(path, winsec.AccessReadControl|winsec.AccessWriteOwner|windows.FILE_READ_ATTRIBUTES|windows.SYNCHRONIZE, 0)
+	if err != nil {
+		return
+	}
+	defer windows.CloseHandle(h)
+	if sd, err := windows.GetSecurityInfo(h, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION); err == nil {
 		if cur, _, err := sd.Owner(); err == nil && cur != nil && cur.Equals(want) {
 			return
 		}
 	}
-	if winsec.EnablePrivilege("SeRestorePrivilege") != nil {
-		return
-	}
-	windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION, want, nil, nil, nil)
+	windows.SetSecurityInfo(h, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION, want, nil, nil, nil)
 }
 
 // indexedLikeFolder gives a bait the same "index this file" setting as the
 // folder it's in (which is what any file created there gets).
 func indexedLikeFolder(path string) {
-	attrs := func(p string) (uint32, bool) {
-		u, _ := windows.UTF16PtrFromString(p)
-		a, err := windows.GetFileAttributes(u)
-		return a, err == nil
-	}
-	fa, ok1 := attrs(path)
-	da, ok2 := attrs(filepath.Dir(path))
-	const noIndex = windows.FILE_ATTRIBUTE_NOT_CONTENT_INDEXED
-	if !ok1 || !ok2 || fa&noIndex == da&noIndex {
+	fh, err := winsec.OpenNoReparse(path, windows.FILE_READ_ATTRIBUTES|windows.FILE_WRITE_ATTRIBUTES|windows.SYNCHRONIZE, 0)
+	if err != nil {
 		return
 	}
-	u, _ := windows.UTF16PtrFromString(path)
-	windows.SetFileAttributes(u, fa&^noIndex|da&noIndex)
+	defer windows.CloseHandle(fh)
+	dh, err := winsec.OpenNoReparse(filepath.Dir(path), windows.FILE_READ_ATTRIBUTES|windows.SYNCHRONIZE, 0)
+	if err != nil {
+		return
+	}
+	defer windows.CloseHandle(dh)
+	var ffi, dfi windows.ByHandleFileInformation
+	if windows.GetFileInformationByHandle(fh, &ffi) != nil || windows.GetFileInformationByHandle(dh, &dfi) != nil {
+		return
+	}
+	const noIndex = windows.FILE_ATTRIBUTE_NOT_CONTENT_INDEXED
+	if ffi.FileAttributes&noIndex == dfi.FileAttributes&noIndex {
+		return
+	}
+	winsec.SetBasicAttributesByHandle(fh, ffi.FileAttributes&^noIndex|dfi.FileAttributes&noIndex)
 }
 
 // asOwner runs fn, which plants or removes files at or around path. On
-// Windows there's nothing to guard against here: making a link that leads
-// an administrator's program somewhere else takes rights an ordinary
-// program doesn't have, and ownedBy hands the file to you afterwards.
+// Windows, ordinary users can create NTFS junctions in folders they own, so
+// bait file, directory, and security operations open every path component with
+// FILE_OPEN_REPARSE_POINT and act directly on the verified handle instead of
+// following junctions or symlinks.
 func asOwner(path string, fn func()) error {
 	fn()
 	return nil
 }
+
+func safeMkdirAll(dir string) error                   { return winsec.MkdirAllNoReparse(dir) }
+func safeReadFile(path string) ([]byte, error)        { return winsec.ReadFileNoReparse(path) }
+func safeWriteFileNew(path string, data []byte) error { return winsec.WriteFileNewNoReparse(path, data) }
+func safeOverwriteInPlace(path string, data []byte) error {
+	return winsec.OverwriteFileNoReparse(path, data)
+}
+func safeRemoveFile(path string) error            { return winsec.DeleteFileNoReparse(path) }
+func safeRemoveEmptyDir(dir string) error         { return winsec.RemoveEmptyDirNoReparse(dir) }
+func safeStat(path string) (os.FileInfo, error)   { return winsec.StatNoReparse(path) }
+func safeReadDir(dir string) ([]os.DirEntry, error) { return winsec.ReadDirNoReparse(dir) }
+func isReparseErr(err error) bool                 { return errors.Is(err, winsec.ErrReparsePoint) }

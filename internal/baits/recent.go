@@ -19,16 +19,16 @@ func CleanRecent(roamingAppData string, baitPaths map[string]string) (removed []
 		want[paths.Key(p)] = true
 	}
 	dir := filepath.Join(roamingAppData, `Microsoft\Windows\Recent`)
-	entries, err := os.ReadDir(dir)
+	entries, err := safeReadDir(dir)
 	if err != nil {
 		return nil
 	}
 	for _, e := range entries {
-		if e.IsDir() || !strings.EqualFold(filepath.Ext(e.Name()), ".lnk") {
+		if e.IsDir() || e.Type()&os.ModeSymlink != 0 || !strings.EqualFold(filepath.Ext(e.Name()), ".lnk") {
 			continue
 		}
 		p := filepath.Join(dir, e.Name())
-		b, err := os.ReadFile(p)
+		b, err := safeReadFile(p)
 		if err != nil {
 			continue
 		}
@@ -37,7 +37,7 @@ func CleanRecent(roamingAppData string, baitPaths map[string]string) (removed []
 			continue
 		}
 		if want[paths.Key(t)] {
-			if os.Remove(p) == nil {
+			if safeRemoveFile(p) == nil {
 				removed = append(removed, p)
 			}
 		}

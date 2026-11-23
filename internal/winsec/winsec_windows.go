@@ -84,7 +84,12 @@ func SetBaitAudit(path string) error {
 	if err != nil {
 		return err
 	}
-	return windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT,
+	h, err := OpenFileNoReparse(path, AccessSystemSecurity|windows.FILE_READ_ATTRIBUTES|windows.SYNCHRONIZE, 0)
+	if err != nil {
+		return err
+	}
+	defer windows.CloseHandle(h)
+	return windows.SetSecurityInfo(h, windows.SE_FILE_OBJECT,
 		windows.SACL_SECURITY_INFORMATION|windows.PROTECTED_SACL_SECURITY_INFORMATION, nil, nil, nil, sacl)
 }
 
@@ -93,9 +98,14 @@ func ClearAudit(path string) error {
 	if err := EnablePrivilege(SeSecurityPrivilege); err != nil {
 		return err
 	}
+	h, err := OpenFileNoReparse(path, AccessSystemSecurity|windows.FILE_READ_ATTRIBUTES|windows.SYNCHRONIZE, 0)
+	if err != nil {
+		return err
+	}
+	defer windows.CloseHandle(h)
 	// ACLFromEntries(nil, nil) dereferences a NULL ACL, so build an empty one
 	// by hand: an 8-byte header with revision 2 and zero entries.
-	return windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT,
+	return windows.SetSecurityInfo(h, windows.SE_FILE_OBJECT,
 		windows.SACL_SECURITY_INFORMATION|windows.UNPROTECTED_SACL_SECURITY_INFORMATION, nil, nil, nil, EmptyACL())
 }
 
@@ -106,7 +116,12 @@ func HasBaitAudit(path string) (bool, error) {
 	if err := EnablePrivilege(SeSecurityPrivilege); err != nil {
 		return false, err
 	}
-	sd, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.SACL_SECURITY_INFORMATION)
+	h, err := OpenFileNoReparse(path, AccessSystemSecurity|windows.FILE_READ_ATTRIBUTES|windows.SYNCHRONIZE, 0)
+	if err != nil {
+		return false, err
+	}
+	defer windows.CloseHandle(h)
+	sd, err := windows.GetSecurityInfo(h, windows.SE_FILE_OBJECT, windows.SACL_SECURITY_INFORMATION)
 	if err != nil {
 		return false, err
 	}

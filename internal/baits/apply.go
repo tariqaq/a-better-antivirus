@@ -43,11 +43,11 @@ func create(s Spec, u config.UserInfo, g *Gen) (*config.BaitState, error) {
 			created[top] = true
 			bs.CreatedDirs = append(bs.CreatedDirs, top)
 		}
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := safeMkdirAll(dir); err != nil {
 			return bs, fmt.Errorf("%s: %w", dir, err)
 		}
 		bf := config.BaitFile{Path: f.Path, Audit: f.Audit}
-		if b, err := os.ReadFile(f.Path); err == nil {
+		if b, err := safeReadFile(f.Path); err == nil {
 			// Adopt an existing file (e.g. from the original honeypot script).
 			if f.Text {
 				bf.Text = string(b)
@@ -57,9 +57,9 @@ func create(s Spec, u config.UserInfo, g *Gen) (*config.BaitState, error) {
 					bf.Created = true
 				}
 			}
-		} else {
+		} else if errors.Is(err, os.ErrNotExist) {
 			data := f.Gen(g)
-			if err := os.WriteFile(f.Path, data, 0o644); err != nil {
+			if err := safeWriteFileNew(f.Path, data); err != nil {
 				return bs, fmt.Errorf("%s: %w", f.Path, err)
 			}
 			bf.Created = true
@@ -68,13 +68,15 @@ func create(s Spec, u config.UserInfo, g *Gen) (*config.BaitState, error) {
 			}
 			ageFile(f.Path)
 			ownedBy(f.Path, u.SID)
+		} else {
+			return bs, fmt.Errorf("%s: %w", f.Path, err)
 		}
 		if f.Audit {
 			if err := SetTripwire(f.Path); err != nil {
 				return bs, fmt.Errorf("audit rule on %s: %w", f.Path, err)
 			}
 		}
-		if fi, err := os.Stat(f.Path); err == nil {
+		if fi, err := safeStat(f.Path); err == nil {
 			bf.Size, bf.ModTime = fi.Size(), fi.ModTime()
 		}
 		bs.Files = append(bs.Files, bf)
@@ -91,7 +93,7 @@ func create(s Spec, u config.UserInfo, g *Gen) (*config.BaitState, error) {
 func topMissingDir(dir string) string {
 	top := ""
 	for d := dir; ; d = filepath.Dir(d) {
-		if _, err := os.Stat(d); err == nil {
+		if _, err := safeStat(d); err == nil || isReparseErr(err) {
 			return top
 		}
 		top = d
@@ -139,7 +141,7 @@ func ageFile(path string) {
 // as its contents: created a while before its oldest entry, last changed when
 // its newest was. It returns the folder's creation time.
 func ageTree(dir, ownerSID string) time.Time {
-	entries, err := os.ReadDir(dir)
+	entries, err := safeReadDir(dir)
 	if err != nil {
 		return time.Time{}
 	}
@@ -153,6 +155,9 @@ func ageTree(dir, ownerSID string) time.Time {
 		}
 	}
 	for _, e := range entries {
+		if e.Type()&os.ModeSymlink != 0 {
+			continue
+		}
 		p := filepath.Join(dir, e.Name())
 		if e.IsDir() {
 			c := ageTree(p, ownerSID)
@@ -200,7 +205,7 @@ func blend(bs *config.BaitState, s Spec, u config.UserInfo, g *Gen) (changed boo
 		if !f.Created {
 			continue
 		}
-		fi, err := os.Lstat(f.Path)
+		fi, err := safeStat(f.Path)
 		if err != nil {
 			continue
 		}
@@ -211,7 +216,7 @@ func blend(bs *config.BaitState, s Spec, u config.UserInfo, g *Gen) (changed boo
 		// opened alike: spread them out.
 		if c, w, ok := getTimes(f.Path); ok && untouched && c.Equal(w) {
 			ageFile(f.Path)
-			if fi2, err := os.Stat(f.Path); err == nil {
+			if fi2, err := safeStat(f.Path); err == nil {
 				f.ModTime, fi = fi2.ModTime(), fi2
 				changed = true
 			}
@@ -225,11 +230,11 @@ func blend(bs *config.BaitState, s Spec, u config.UserInfo, g *Gen) (changed boo
 			continue
 		}
 		// Written in place: the file keeps its audit rule.
-		if os.WriteFile(f.Path, data, 0o644) != nil {
+		if safeOverwriteInPlace(f.Path, data) != nil {
 			continue
 		}
 		ageFile(f.Path)
-		if fi, err := os.Stat(f.Path); err == nil {
+		if fi, err := safeStat(f.Path); err == nil {
 			f.Size, f.ModTime = fi.Size(), fi.ModTime()
 		}
 		changed = true
@@ -238,17 +243,13 @@ func blend(bs *config.BaitState, s Spec, u config.UserInfo, g *Gen) (changed boo
 		// A folder newer than something in it is one ABA made in a hurry.
 		newer := false
 		dc, _, ok := getTimes(d)
-		filepath.Walk(d, func(p string, fi os.FileInfo, err error) error {
-			if err != nil {
-				return nil
-			}
-			if fi.IsDir() {
+		walkSafeTree(d, func(p string, isDir bool) {
+			if isDir {
 				ownedBy(p, u.SID)
 			}
 			if c, _, ok2 := getTimes(p); ok && ok2 && p != d && c.Before(dc) {
 				newer = true
 			}
-			return nil
 		})
 		if newer {
 			ageTree(d, u.SID)
@@ -268,7 +269,11 @@ type Problem struct {
 func Check(bs *config.BaitState) []Problem {
 	var out []Problem
 	for _, f := range bs.Files {
-		fi, err := os.Stat(f.Path)
+		fi, err := safeStat(f.Path)
+		if isReparseErr(err) {
+			out = append(out, Problem{File: f.Path, Kind: "reparse", Detail: err.Error()})
+			continue
+		}
 		if errors.Is(err, os.ErrNotExist) {
 			out = append(out, Problem{File: f.Path, Kind: "missing"})
 			continue
@@ -317,17 +322,27 @@ func repair(bs *config.BaitState, s Spec, u config.UserInfo, g *Gen, probs []Pro
 		}
 		bf := &bs.Files[idx]
 		switch p.Kind {
+		case "reparse":
+			if firstErr == nil {
+				firstErr = fmt.Errorf("%s: %s", p.File, p.Detail)
+			}
+			continue
 		case "missing":
 			fs, ok := specs[strings.ToLower(p.File)]
 			if !ok {
 				continue
 			}
-			os.MkdirAll(filepath.Dir(p.File), 0o755)
+			if err := safeMkdirAll(filepath.Dir(p.File)); err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+				continue
+			}
 			data := []byte(bf.Text)
 			if data == nil || !fs.Text {
 				data = fs.Gen(g)
 			}
-			if err := os.WriteFile(p.File, data, 0o644); err != nil {
+			if err := safeWriteFileNew(p.File, data); err != nil {
 				if firstErr == nil {
 					firstErr = err
 				}
@@ -346,14 +361,14 @@ func repair(bs *config.BaitState, s Spec, u config.UserInfo, g *Gen, probs []Pro
 					firstErr = err
 				}
 			}
-			if fi, err := os.Stat(p.File); err == nil {
+			if fi, err := safeStat(p.File); err == nil {
 				bf.Size, bf.ModTime = fi.Size(), fi.ModTime()
 			}
 		case "modified":
 			// Something (you, or a real app) wrote to it: from now on we never
 			// delete it, we only take our audit rule off when removing.
 			bf.Created = false
-			if fi, err := os.Stat(p.File); err == nil {
+			if fi, err := safeStat(p.File); err == nil {
 				bf.Size, bf.ModTime = fi.Size(), fi.ModTime()
 			}
 		}
@@ -419,7 +434,7 @@ func remove(bs *config.BaitState) error {
 			if removeEmptyTree(bs.CreatedDirs[i]) {
 				break
 			}
-			if _, err := os.Stat(bs.CreatedDirs[i]); err != nil || !onlyPendingDeletes(bs.CreatedDirs[i], bs) {
+			if _, err := safeStat(bs.CreatedDirs[i]); err != nil || !onlyPendingDeletes(bs.CreatedDirs[i], bs) {
 				break
 			}
 			time.Sleep(150 * time.Millisecond)
@@ -437,7 +452,8 @@ func remove(bs *config.BaitState) error {
 func removeFile(path string) error {
 	var err error
 	for try := 0; try < 20; try++ {
-		if err = os.Remove(path); err == nil || errors.Is(err, os.ErrNotExist) {
+		err = safeRemoveFile(path)
+		if err == nil || errors.Is(err, os.ErrNotExist) || isReparseErr(err) {
 			return err
 		}
 		time.Sleep(150 * time.Millisecond)
@@ -448,7 +464,7 @@ func removeFile(path string) error {
 // removeEmptyTree deletes dir and empty subdirectories, keeping anything with
 // files in it (e.g. if the real app has since moved in).
 func removeEmptyTree(dir string) bool {
-	entries, err := os.ReadDir(dir)
+	entries, err := safeReadDir(dir)
 	if err != nil {
 		return false
 	}
@@ -457,13 +473,17 @@ func removeEmptyTree(dir string) bool {
 	// keeps the folder.
 	empty := true
 	for _, e := range entries {
+		if e.Type()&os.ModeSymlink != 0 {
+			empty = false
+			continue
+		}
 		if e.IsDir() && removeEmptyTree(filepath.Join(dir, e.Name())) {
 			continue
 		}
 		empty = false
 	}
 	if empty {
-		return os.Remove(dir) == nil
+		return safeRemoveEmptyDir(dir) == nil
 	}
 	return false
 }
@@ -486,7 +506,10 @@ func Index(st *config.State) map[string]string {
 
 // unchanged reports whether a bait file still has the size and timestamp we recorded.
 func unchanged(f config.BaitFile) bool {
-	fi, err := os.Stat(f.Path)
+	fi, err := safeStat(f.Path)
+	if isReparseErr(err) {
+		return false
+	}
 	if err != nil {
 		return true // already gone; nothing to protect
 	}
@@ -545,11 +568,37 @@ func onlyPendingDeletes(dir string, bs *config.BaitState) bool {
 		}
 	}
 	only := true
-	filepath.Walk(dir, func(p string, fi os.FileInfo, err error) error {
-		if err == nil && !fi.IsDir() && !ours[paths.Key(p)] {
+	walkSafeTree(dir, func(p string, isDir bool) {
+		if !isDir && !ours[paths.Key(p)] {
 			only = false
 		}
-		return nil
 	})
 	return only
+}
+
+func walkSafeTree(dir string, fn func(path string, isDir bool)) {
+	fi, err := safeStat(dir)
+	if err != nil || !fi.IsDir() {
+		return
+	}
+	fn(dir, true)
+	var visit func(string)
+	visit = func(cur string) {
+		entries, err := safeReadDir(cur)
+		if err != nil {
+			return
+		}
+		for _, e := range entries {
+			if e.Type()&os.ModeSymlink != 0 {
+				continue
+			}
+			p := filepath.Join(cur, e.Name())
+			isDir := e.IsDir()
+			fn(p, isDir)
+			if isDir {
+				visit(p)
+			}
+		}
+	}
+	visit(dir)
 }
