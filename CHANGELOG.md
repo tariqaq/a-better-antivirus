@@ -23,7 +23,7 @@ The clipboard bait now works on real copies, and alerts say where a program came
   `aba alerts show`, the popup and phone alerts. A program can fake that mark, so it's a lead, not proof.
 - **Phone alerts name the computer**, for whoever gets alerts from more than one.
 - **A fake profile inside your real Firefox** on Windows and macOS, as on Linux, and **saved git passwords**
-  (`~/.git-credentials`) on Windows. Run `aba setup` to add them to an existing install.
+  (`~/.git-credentials`) on Windows. Run `aba configure` to add them to an existing install.
 - **The Windows SSH key bait gets its own name per install**, like the other files. Existing installs keep
   theirs until `aba bait rename`.
 - **The after-a-detection checklist fits the computer:** no "reset Windows" on a Mac or Linux, and a clipper

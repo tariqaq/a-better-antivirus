@@ -13,7 +13,7 @@ Thanks for helping make stealers' lives harder. Bug reports, new bait ideas and 
 
 ## Developing
 
-You need Go (see `go.mod`). ABA runs on Windows and Linux (see [Platforms](#platforms)).
+You need Go (see `go.mod`). ABA runs on Windows, Linux and macOS (see [Platforms](#platforms)).
 
 ```
 go vet ./...
@@ -58,7 +58,7 @@ The same warning applies: a throwaway machine.
 
 ## Platforms
 
-ABA runs on Windows and Linux, macOS is being added, and the code is split so that a new system doesn't
+ABA runs on Windows, Linux and macOS, and the code is split so that a new system doesn't
 touch the shared logic:
 
 - **The core** is every file without a system in its name: the engine, the severity logic, alerts,
@@ -68,8 +68,7 @@ touch the shared logic:
   calls them. Go picks the file by its name, so there is nothing to register. Tests of one system's
   behaviour are named `*_<os>_test.go` the same way.
 
-macOS has a stub for every such file today. Each returns `platform.ErrUnsupported` ("not supported on macOS yet"), so everything
-builds there and nothing pretends to work. Porting is replacing the stubs, keeping the same functions. What a
+Each operating system implements the same backend functions (or returns `platform.ErrUnsupported` where a capability isn't available yet). What a
 system has to provide:
 
 | Package | In its `_<os>.go` file |
@@ -89,7 +88,7 @@ system has to provide:
 Two rules keep the systems out of each other's way. Work in your system's files; if the core needs
 something new from the system, add it to all three (a stub that returns `platform.Unsupported(...)` is
 fine for the ones you can't write). And helpers only one system needs go in their own package, like
-`winsec`, `evtlog` and `instant` for Windows, and `fanwatch` for Linux.
+`winsec`, `evtlog`, `instant` and `clipbait` for Windows, and `fanwatch` for Linux.
 
 CI vets and tests on Windows, Linux and macOS. To check the others from one machine:
 

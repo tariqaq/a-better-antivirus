@@ -261,7 +261,7 @@ func blend(bs *config.BaitState, s Spec, u config.UserInfo, g *Gen) (changed boo
 // Problem found by Check.
 type Problem struct {
 	File   string
-	Kind   string // missing | no-audit | modified
+	Kind   string // missing | no-audit | modified | reparse
 	Detail string
 }
 

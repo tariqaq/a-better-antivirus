@@ -34,7 +34,7 @@ is a vulnerability:
   an unsigned DLL, a sweep split across processes, a scheduled task in session 0.
 - **Get code run with more rights** through anything ABA starts or writes.
 
-`internal/engine/bypass_test.go`, `internal/instant/ghost_test.go` and the *Evasion* step of
+`internal/engine/bypass_windows_test.go`, `internal/instant/ghost_windows_test.go` and the *Evasion* step of
 `scripts/e2e.ps1` each replay one of these. A new bypass report is most useful as one more test there.
 
 ## How releases and updates are protected
